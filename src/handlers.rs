@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::ArgMatches;
+use colored::Colorize;
 use google_calendar3::{
     chrono, hyper::client::HttpConnector, hyper_rustls::HttpsConnector, CalendarHub,
 };
@@ -32,7 +33,32 @@ pub async fn default(
     // );
     // println!();
     for event in events {
-        println!(
+        let has_started: bool = event
+            .start
+            .as_ref()
+            .and_then(|start| start.date_time)
+            .map(|start| start <= chrono::Utc::now())
+            .unwrap_or(false);
+        let has_ended: bool = event
+            .end
+            .as_ref()
+            .and_then(|end| end.date_time)
+            .map(|end| end <= chrono::Utc::now())
+            .unwrap_or(false);
+
+        let is_ongoing = has_started && !has_ended;
+
+        let is_close = !has_started
+            && event
+                .start
+                .as_ref()
+                .and_then(|start| start.date_time)
+                .map(|start| {
+                    start <= chrono::Utc::now() + chrono::Duration::try_minutes(15).unwrap()
+                })
+                .unwrap_or(false);
+
+        let mut out = format!(
             "{}: {}",
             event
                 .summary
@@ -47,6 +73,24 @@ pub async fn default(
                     .to_string())
                 .unwrap_or("<No start time given>".to_string())
         );
+
+        if is_ongoing {
+            out.push_str(" (ONGOING)");
+            println!("{}", out.red());
+            continue;
+        }
+
+        if is_close {
+            println!("{}", out.yellow());
+            continue;
+        }
+
+        if has_ended {
+            println!("{}", out.dimmed());
+            continue;
+        }
+
+        println!("{}", out);
     }
 
     Ok(())
