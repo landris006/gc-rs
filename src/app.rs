@@ -48,6 +48,9 @@ impl App {
             Some(("calendars", args)) => {
                 handlers::calendars(&self.hub, args).await?;
             }
+            Some(("meet", args)) => {
+                handlers::meet(&self.hub, args).await?;
+            }
             _ => {
                 handlers::default(&self.hub, &matches).await?;
             }

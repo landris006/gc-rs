@@ -2,37 +2,101 @@ use anyhow::Result;
 use clap::ArgMatches;
 use colored::Colorize;
 use google_calendar3::{
-    chrono, hyper::client::HttpConnector, hyper_rustls::HttpsConnector, CalendarHub,
+    api::Event, chrono, hyper::client::HttpConnector, hyper_rustls::HttpsConnector, CalendarHub,
 };
+
+pub async fn meet(
+    hub: &CalendarHub<HttpsConnector<HttpConnector>>,
+    args: &ArgMatches,
+) -> Result<()> {
+    let events = get_events(
+        hub,
+        args.get_one::<String>("calendar-id").map(|id| id.as_str()),
+    )
+    .await?;
+
+    let event_index = args
+        .get_one::<String>("event-index")
+        .and_then(|index| Some(index.parse::<usize>().ok()? - 1));
+
+    if let Some(index) = event_index {
+        let event = events
+            .get(index)
+            .ok_or_else(|| anyhow::anyhow!("No event found at index {}", index + 1))?;
+
+        let url = extract_link(event)
+            .ok_or_else(|| anyhow::anyhow!("No Google Meet link found for event"))?;
+
+        return Ok(open::that(url)?);
+    }
+
+    let ongoing_event = events.iter().find(|event| {
+        let has_started: bool = event
+            .start
+            .as_ref()
+            .and_then(|start| start.date_time)
+            .map(|start| start <= chrono::Utc::now())
+            .unwrap_or(false);
+        let has_ended: bool = event
+            .end
+            .as_ref()
+            .and_then(|end| end.date_time)
+            .map(|end| end <= chrono::Utc::now())
+            .unwrap_or(false);
+
+        has_started && !has_ended
+    });
+
+    if let Some(ongoing_event) = ongoing_event {
+        let url = extract_link(ongoing_event)
+            .ok_or_else(|| anyhow::anyhow!("No Google Meet link found for ongoing event"))?;
+        return Ok(open::that(url)?);
+    }
+
+    let next_event = events
+        .iter()
+        .find(|event| {
+            event
+                .start
+                .as_ref()
+                .and_then(|start| start.date_time)
+                .map(|start| start > chrono::Utc::now())
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| anyhow::anyhow!("No upcoming events found"))?;
+
+    let url = extract_link(next_event).ok_or_else(|| {
+        anyhow::anyhow!("No ongoing or upcoming events found, specify the index of the event")
+    })?;
+
+    Ok(open::that(url)?)
+}
+
+fn extract_link(event: &Event) -> Option<&str> {
+    let url = event.hangout_link.as_ref().or_else(|| {
+        event.conference_data.as_ref().and_then(|data| {
+            data.entry_points.as_ref().and_then(|entry_points| {
+                entry_points
+                    .first()
+                    .and_then(|entry_point| entry_point.uri.as_ref())
+            })
+        })
+    });
+
+    url.map(|url| url.as_str())
+}
 
 pub async fn default(
     hub: &CalendarHub<HttpsConnector<HttpConnector>>,
     args: &ArgMatches,
 ) -> Result<()> {
-    let start_of_today = chrono::Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc();
-    let end_of_today = start_of_today + chrono::Duration::try_days(1).unwrap();
+    let events = get_events(
+        hub,
+        args.get_one::<String>("calendar-id").map(|id| id.as_str()),
+    )
+    .await?;
 
-    let (_, events) = hub
-        .events()
-        .list(args.get_one::<String>("id").unwrap()) // safe to unwrap, as the default value is "primary"
-        .single_events(true)
-        .time_min(start_of_today)
-        .time_max(end_of_today)
-        .order_by("startTime")
-        .doit()
-        .await?;
-    let events = events.items.unwrap_or_default();
-
-    // println!(
-    //     "Events for today ({}):",
-    //     chrono::Local::now().format("%Y %B %e, %A")
-    // );
-    // println!();
-    for event in events {
+    for (index, event) in events.into_iter().enumerate() {
         let has_started: bool = event
             .start
             .as_ref()
@@ -54,12 +118,13 @@ pub async fn default(
                 .as_ref()
                 .and_then(|start| start.date_time)
                 .map(|start| {
-                    start <= chrono::Utc::now() + chrono::Duration::try_minutes(15).unwrap()
+                    start <= chrono::Utc::now() + chrono::Duration::try_minutes(30).unwrap()
                 })
                 .unwrap_or(false);
 
         let mut out = format!(
-            "{}: {}",
+            "{}. {}: {}",
+            index + 1,
             event
                 .summary
                 .unwrap_or("<No description given>".to_string()),
@@ -69,10 +134,19 @@ pub async fn default(
                 .and_then(|start| start.date_time)
                 .map(|start| start
                     .with_timezone(&chrono::Local)
-                    .format("%H:%M (%Z)")
+                    .format("%H:%M")
                     .to_string())
                 .unwrap_or("<No start time given>".to_string())
         );
+
+        let is_recurring = event
+            .recurring_event_id
+            .map(|id| !id.is_empty())
+            .unwrap_or(false);
+
+        if is_recurring {
+            out.push_str(" (recurring)");
+        }
 
         if is_ongoing {
             out.push_str(" (ONGOING)");
@@ -125,4 +199,29 @@ pub async fn logout() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn get_events(
+    hub: &CalendarHub<HttpsConnector<HttpConnector>>,
+    calendar_id: Option<&str>,
+) -> Result<Vec<Event>> {
+    let start_of_today = chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
+    let end_of_today = start_of_today + chrono::Duration::try_days(1).unwrap();
+
+    let (_, events) = hub
+        .events()
+        .list(calendar_id.unwrap_or("primary"))
+        .single_events(true)
+        .time_min(start_of_today)
+        .time_max(end_of_today)
+        .order_by("startTime")
+        .doit()
+        .await?;
+    let events = events.items.unwrap_or_default();
+
+    Ok(events)
 }
