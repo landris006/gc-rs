@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::ArgMatches;
 use google_calendar3::{
     chrono, hyper::client::HttpConnector, hyper_rustls::HttpsConnector, CalendarHub,
@@ -6,7 +7,7 @@ use google_calendar3::{
 pub async fn default(
     hub: &CalendarHub<HttpsConnector<HttpConnector>>,
     args: &ArgMatches,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let start_of_today = chrono::Local::now()
         .date_naive()
         .and_hms_opt(0, 0, 0)
@@ -54,7 +55,7 @@ pub async fn default(
 pub async fn calendars(
     hub: &CalendarHub<HttpsConnector<HttpConnector>>,
     args: &ArgMatches,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let (_, calendars) = hub.calendar_list().list().show_hidden(true).doit().await?;
 
     let calendars = calendars.items.unwrap_or_default();
@@ -67,6 +68,16 @@ pub async fn calendars(
                 false => calendar.summary.unwrap_or_default(),
             }
         );
+    }
+
+    Ok(())
+}
+
+pub async fn logout() -> Result<()> {
+    match std::fs::remove_file("tokencache.json") {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
 
     Ok(())

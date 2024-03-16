@@ -1,3 +1,4 @@
+use anyhow::Result;
 use calendar3::{
     hyper::{self, client::HttpConnector},
     hyper_rustls::{self, HttpsConnector},
@@ -14,7 +15,7 @@ pub struct App {
 }
 
 impl App {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<Self> {
         let secret: ApplicationSecret = oauth2::read_application_secret("secret.json").await?;
 
         let auth = oauth2::InstalledFlowAuthenticator::builder(
@@ -39,8 +40,11 @@ impl App {
         Ok(Self { hub })
     }
 
-    pub async fn handle(&self, matches: ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn handle(&self, matches: ArgMatches) -> Result<()> {
         match matches.subcommand() {
+            Some(("logout", _)) => {
+                handlers::logout().await?;
+            }
             Some(("calendars", args)) => {
                 handlers::calendars(&self.hub, args).await?;
             }

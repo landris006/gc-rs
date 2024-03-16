@@ -1,17 +1,19 @@
 mod app;
 mod handlers;
 
+use anyhow::Result;
 use app::App;
 use clap::{arg, Arg, Command};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let matches = clap::command!()
         .subcommand(
             Command::new("calendars")
                 .about("List avaliable calendars")
                 .arg(arg!(--id "Display the IDs of the calendars")),
         )
+        .subcommand(Command::new("logout").about("Delete the cached access tokens"))
         .arg(
             Arg::new("id")
                 .long("id")
