@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::ArgMatches;
 use colored::Colorize;
@@ -15,9 +17,7 @@ pub async fn meet(
     )
     .await?;
 
-    let event_index = args
-        .get_one::<String>("event-index")
-        .and_then(|index| Some(index.parse::<usize>().ok()? - 1));
+    let event_index = args.get_one::<usize>("event-index").map(|index| index - 1);
 
     if let Some(index) = event_index {
         let event = events
@@ -27,6 +27,11 @@ pub async fn meet(
         let url = extract_link(event)
             .ok_or_else(|| anyhow::anyhow!("No Google Meet link found for event"))?;
 
+        println!(
+            "Opening Google Meet link for '{}' ({})",
+            event.summary.as_ref().unwrap_or(&"".to_string()),
+            url
+        );
         return Ok(open::that(url)?);
     }
 
@@ -50,6 +55,12 @@ pub async fn meet(
     if let Some(ongoing_event) = ongoing_event {
         let url = extract_link(ongoing_event)
             .ok_or_else(|| anyhow::anyhow!("No Google Meet link found for ongoing event"))?;
+
+        println!(
+            "Opening Google Meet link for ongoing event '{}' ({})",
+            ongoing_event.summary.as_ref().unwrap_or(&"".to_string()),
+            url
+        );
         return Ok(open::that(url)?);
     }
 
@@ -69,6 +80,11 @@ pub async fn meet(
         anyhow::anyhow!("No ongoing or upcoming events found, specify the index of the event")
     })?;
 
+    println!(
+        "Opening Google Meet link for next event '{}' ({})",
+        next_event.summary.as_ref().unwrap_or(&"".to_string()),
+        url
+    );
     Ok(open::that(url)?)
 }
 
@@ -224,4 +240,20 @@ async fn get_events(
     let events = events.items.unwrap_or_default();
 
     Ok(events)
+}
+
+pub async fn setup(args: &ArgMatches) -> Result<()> {
+    let path = args.get_one::<PathBuf>("file").expect("file is required");
+    let file = std::fs::read_to_string(path)?;
+
+    let data_dir = crate::data_dir()?;
+
+    std::fs::write(data_dir.join("secret.json"), file)?;
+
+    println!(
+        "Credentials file copied to '{}'",
+        data_dir.join("secret.json").to_str().unwrap_or("")
+    );
+
+    Ok(())
 }

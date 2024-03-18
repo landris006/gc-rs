@@ -1,13 +1,18 @@
-mod app;
-mod handlers;
+use std::path::PathBuf;
 
 use anyhow::Result;
-use app::App;
-use clap::{arg, Arg, Command};
+use clap::{arg, value_parser, Arg, Command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let matches = clap::command!()
+        .subcommand(
+            Command::new("setup")
+                .arg(Arg::new("file").value_name("FILE").value_parser(
+                    value_parser!(PathBuf)
+                ).required(true).help("The path to the credentials file"))
+                .about("Copies your Google credentials file to the data directory")
+        )
         .subcommand(
             Command::new("calendars")
                 .about("List avaliable calendars")
@@ -20,6 +25,7 @@ async fn main() -> Result<()> {
                 .arg(
                     Arg::new("event-index")
                         .value_name("INDEX")
+                        .value_parser(value_parser!(usize))
                         .help("Optionally specify the index of the event to open (defaults to the ongoing or next event)")
                 )
                 .arg(
@@ -37,7 +43,5 @@ async fn main() -> Result<()> {
         )
         .get_matches();
 
-    let app = App::new().await?;
-
-    app.handle(matches).await
+    gc_rs::handle(matches).await
 }
